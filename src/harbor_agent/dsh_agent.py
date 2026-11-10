@@ -16,7 +16,7 @@ from harbor.models.agent.context import AgentContext
 
 
 DSH_RUNTIME_VERSION = "0.2.2-rc.1"
-ADAPTER_VERSION = "0.1.0"
+ADAPTER_VERSION = "0.1.1"
 
 
 class DSHAgentOptions(AgentOptions):
