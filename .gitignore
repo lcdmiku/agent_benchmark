@@ -1,0 +1,72 @@
+# ==========================================
+# Python
+# ==========================================
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+build/
+dist/
+*.egg-info/
+
+# ==========================================
+# Environment variables and secrets
+# ==========================================
+.env
+.env.*
+!.env.example
+!.env.template
+*.pem
+*.key
+
+# ==========================================
+# Local DSH state and credentials
+# ==========================================
+.dsh-local/
+.dsh-cache/
+
+# ==========================================
+# Harbor experiment outputs
+# ==========================================
+runs/harbor-jobs/
+
+# Temporary experiment files
+*.tmp
+*.temp
+*.bak
+
+# ==========================================
+# Logs and temporary files
+# ==========================================
+*.log
+*.swp
+*~
+
+# ==========================================
+# Docker and build artifacts
+# ==========================================
+docker-compose.override.yml
+
+# ==========================================
+# Operating system
+# ==========================================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ==========================================
+# IDE
+# ==========================================
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
