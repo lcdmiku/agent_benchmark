@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import json
@@ -9,18 +8,24 @@ from typing import Any, ClassVar
 
 from pydantic import Field
 
-from harbor.agents.base import BaseAgent
-from harbor.agents.options import AgentOptions
+from harbor.agents.installed.base import BaseInstalledAgent
+from harbor.agents.options import InstalledAgentOptions
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
 
 DSH_RUNTIME_VERSION = "0.2.2-rc.1"
-ADAPTER_VERSION = "0.1.1"
+ADAPTER_VERSION = "0.1.2"
+
+NVM_VERSION = "v0.40.2"
+DSH_NODE_MAJOR = 24
 
 
-class DSHAgentOptions(AgentOptions):
-    """Options exposed by the Harbor DSH adapter."""
+class DSHAgentOptions(InstalledAgentOptions):
+    version: str | None = Field(
+        default=DSH_RUNTIME_VERSION,
+        description="DSH CLI version to install.",
+    )
 
     timeout_sec: int = Field(
         default=540,
@@ -30,20 +35,20 @@ class DSHAgentOptions(AgentOptions):
     )
 
 
-class DSHAgent(BaseAgent):
+class DSHAgent(BaseInstalledAgent):
     """Run DeepSeek Harness through its Headless CLI."""
 
-    options_model: ClassVar[type[AgentOptions] | None] = DSHAgentOptions
+    options_model: ClassVar[type[InstalledAgentOptions] | None] = (
+        DSHAgentOptions
+    )
+    options: DSHAgentOptions
 
     @staticmethod
     def name() -> str:
         return "dsh-headless"
 
-    def version(self) -> str:
-        return ADAPTER_VERSION
-
     def _runtime_env(self) -> dict[str, str]:
-        """Forward only explicitly configured variables and required credentials."""
+        """Forward explicitly configured variables and credentials."""
 
         env = {
             "HOME": "/root",
@@ -52,14 +57,204 @@ class DSHAgent(BaseAgent):
 
         env.update(self.extra_env)
 
-        # Headless uses launch-time API credentials.
-        for key in ("DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL"):
+        # Preserve existing DeepSeek configuration.
+        for key in (
+                "DEEPSEEK_API_KEY",
+                "DEEPSEEK_BASE_URL",
+        ):
             if key not in env:
                 value = self._get_env(key)
                 if value is not None:
                     env[key] = value
 
+        # Support both the project-specific name and
+        # Alibaba's conventional environment variable.
+        bailian_key = self._get_env(
+            "BAILIAN_API_KEY",
+            "DASHSCOPE_API_KEY",
+        )
+
+        if bailian_key is not None:
+            env["BAILIAN_API_KEY"] = bailian_key
+
         return env
+
+
+    def get_version_command(self) -> str | None:
+        """Detect DSH version in non-interactive shells."""
+        return (
+            'export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"; '
+            'if [ -s "$NVM_DIR/nvm.sh" ]; then '
+            '. "$NVM_DIR/nvm.sh"; '
+            "fi; "
+            "dsh --version"
+        )
+
+    async def install(self, environment: BaseEnvironment) -> None:
+        """Install Node.js and the requested DSH CLI version."""
+
+        await self.ensure_system_dependencies(
+            environment,
+            ("curl", "ca_certificates"),
+        )
+
+        version = self._version or "latest"
+        if self._version == "latest":
+            self._version = None
+        package_spec = f"@deepseek-ai/dsh@{version}"
+
+        version_check = ""
+        if self._version and self._version != "latest":
+            version_check = (
+                f'test "$actual" = {shlex.quote(self._version)}; '
+            )
+
+        command = (
+            "set -euo pipefail; "
+
+            # Install NVM.
+            f"curl -fsSL "
+            f"https://raw.githubusercontent.com/nvm-sh/nvm/"
+            f"{NVM_VERSION}/install.sh "
+            "| env -u NODE_VERSION bash; "
+
+            # Load NVM in this non-interactive shell.
+            'export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"; '
+            'test -s "$NVM_DIR/nvm.sh"; '
+            '. "$NVM_DIR/nvm.sh"; '
+
+            # Install Node.js.
+            f"nvm install {DSH_NODE_MAJOR}; "
+            f"nvm alias default {DSH_NODE_MAJOR}; "
+
+            # Validate the Node.js engine requirement.
+            "node -e 'const [major, minor] = "
+            "process.versions.node.split(\".\").map(Number); "
+            "if (!((major === 22 && minor >= 19) || major >= 24)) "
+            "process.exit(1)'; "
+
+            # Install DSH.
+            "npm install --global "
+            "--no-audit --no-fund "
+            "--fetch-retries=5 "
+            '--allow-scripts=@deepseek-ai/dsh-subprocess-local,koffi,node-pty,@google/genai,protobufjs \
+             @deepseek-ai/dsh@0.2.2-rc.1 '
+            f"{shlex.quote(package_spec)}; "
+
+            # Verify installation.
+            'actual="$(dsh --version)"; '
+            'printf "Installed DSH version: %s\\n" "$actual"; '
+
+            f"{version_check}"
+
+            # Verify Headless JSON support.
+            'help="$(dsh --profile headless --help 2>&1)"; '
+            'printf "%s\\n" "$help" | grep -q -- "--json"; '
+            'printf "Node.js: %s\n" "$(node --version)"; '
+            'printf "npm: %s\n" "$(npm --version)"; '
+            'printf "DSH: %s\n" "$actual"; '
+        )
+
+        self._write_log("dsh-install-command.txt", command + "\n")
+
+        try:
+            result = await environment.exec(
+                command=command,
+                cwd="/app",
+                env=self._runtime_env(),
+                timeout_sec=300,
+            )
+        except Exception as exc:
+            self._write_log(
+                "dsh-install-error.txt",
+                repr(exc) + "\n",
+            )
+            raise
+
+        self._write_log(
+            "dsh-install-stdout.txt",
+            result.stdout or "",
+        )
+        self._write_log(
+            "dsh-install-stderr.txt",
+            result.stderr or "",
+        )
+
+        if result.return_code != 0:
+            details = result.stderr or result.stdout or "no output"
+            raise RuntimeError(
+                f"DSH installation failed "
+                f"(exit={result.return_code}): {details}"
+            )
+
+        # Provision Bailian configuration for the headless profile.
+        runtime_env = self._runtime_env()
+
+        if not runtime_env.get("BAILIAN_API_KEY"):
+            raise RuntimeError(
+                "Missing BAILIAN_API_KEY. "
+                "Set BAILIAN_API_KEY or DASHSCOPE_API_KEY."
+            )
+
+        config_source = Path(__file__).with_name(
+            "dsh-headless-bailian.cordis.patch.yml"
+        )
+
+        if not config_source.is_file():
+            raise FileNotFoundError(
+                f"Missing DSH provider config: {config_source}"
+            )
+
+        profile_dir = "/root/.dsh/profiles/headless"
+        config_target = f"{profile_dir}/cordis.patch.yml"
+
+        # Create profile directory.
+        mkdir_result = await environment.exec(
+            command=f"mkdir -p {shlex.quote(profile_dir)}",
+            cwd="/app",
+            env=runtime_env,
+            timeout_sec=30,
+        )
+
+        if mkdir_result.return_code != 0:
+            raise RuntimeError(
+                "Failed to create DSH profile directory: "
+                + (mkdir_result.stderr or mkdir_result.stdout or "")
+            )
+
+        # Upload provider configuration.
+        await environment.upload_file(
+            source_path=config_source,
+            target_path=config_target,
+        )
+
+        # Verify configuration.
+        verify_result = await environment.exec(
+            command=(
+                "set -eu; "
+                f"test -s {shlex.quote(config_target)}; "
+                f"grep -q 'id: llm-pi-ai' {shlex.quote(config_target)}; "
+                f"grep -q 'qwen3.8-max' {shlex.quote(config_target)}"
+            ),
+            cwd="/app",
+            env=runtime_env,
+            timeout_sec=30,
+        )
+
+        if verify_result.return_code != 0:
+            raise RuntimeError(
+                "Bailian profile configuration verification failed: "
+                + (verify_result.stderr or verify_result.stdout or "")
+            )
+
+        self.logger.info(
+            "DSH Bailian profile configured: qwen3.8-max"
+        )
+
+
+    # def version(self) -> str:
+    #     return ADAPTER_VERSION
+
 
     def _write_log(self, filename: str, content: str) -> None:
         self.logs_dir.mkdir(parents=True, exist_ok=True)
@@ -162,41 +357,6 @@ class DSHAgent(BaseAgent):
             "malformed_details": malformed_details,
         }
 
-    async def setup(self, environment: BaseEnvironment) -> None:
-        """Validate the DSH runtime inside the task container."""
-
-        command = (
-            "set -eu; "
-            "mkdir -p /app /root/.dsh; "
-            'actual="$(dsh --version)"; '
-            'printf "%s\\n" "$actual"; '
-            f"test \"$actual\" = {shlex.quote(DSH_RUNTIME_VERSION)}; "
-            'help="$(dsh --profile headless --help 2>&1)"; '
-            'printf "%s\\n" "$help" | grep -q -- "--json"'
-        )
-
-        result = await environment.exec(
-            command=command,
-            cwd="/app",
-            env=self._runtime_env(),
-            timeout_sec=60,
-        )
-
-        self._write_log(
-            "dsh-setup-stdout.txt",
-            result.stdout or "",
-        )
-        self._write_log(
-            "dsh-setup-stderr.txt",
-            result.stderr or "",
-        )
-
-        if result.return_code != 0:
-            details = result.stderr or result.stdout or "no output"
-            raise RuntimeError(
-                f"DSH runtime preflight failed "
-                f"(exit={result.return_code}): {details}"
-            )
 
     async def run(
         self,
@@ -224,21 +384,30 @@ class DSHAgent(BaseAgent):
 
         # Reconstruct the instruction inside the Docker environment.
         instruction_runtime_path = "/tmp/dsh-instruction.md"
-        await environment.upload_file(
-            source_path=instruction_host_path,
-            target_path=instruction_runtime_path,
-        )
 
         command = (
             "set -eu; "
+
+            # Load NVM.
+            'export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"; '
+            'test -s "$NVM_DIR/nvm.sh"; '
+            '. "$NVM_DIR/nvm.sh"; '
+
+            # Initialize DSH.
+            'export DSH_HOME="${DSH_HOME:-$HOME/.dsh}"; '
+            'mkdir -p "$DSH_HOME"; '
+
+            # Instruction lifecycle.
             "input=/tmp/dsh-instruction.md; "
             "trap 'rm -f \"$input\"' EXIT; "
-            "test -s \"$input\"; "
+            'test -s "$input"; '
+
+            # Execute DSH Headless.
             "dsh --profile headless "
             "--json "
             "--permission-mode workspace-write "
             "--approval-policy never "
-            "- < \"$input\""
+            '- < "$input"'
         )
 
         started = time.monotonic()
@@ -248,6 +417,7 @@ class DSHAgent(BaseAgent):
                 source_path=instruction_host_path,
                 target_path=instruction_runtime_path,
             )
+
             result = await environment.exec(
                 command=command,
                 cwd="/app",
@@ -264,7 +434,7 @@ class DSHAgent(BaseAgent):
             metadata = dict(context.metadata or {})
             metadata["dsh"] = {
                 "adapter_version": ADAPTER_VERSION,
-                "runtime_version": DSH_RUNTIME_VERSION,
+                "runtime_version": self.version(),
                 "execution_error": repr(exc),
             }
             context.metadata = metadata
@@ -284,7 +454,7 @@ class DSHAgent(BaseAgent):
 
         summary = {
             "adapter_version": ADAPTER_VERSION,
-            "runtime_version": DSH_RUNTIME_VERSION,
+            "runtime_version": self.version(),
             "profile": "headless",
             "workdir": "/app",
             "process_return_code": result.return_code,
