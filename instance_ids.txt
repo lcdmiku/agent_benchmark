@@ -1,0 +1,10 @@
+psf__requests-6028
+pydata__xarray-4356
+sympy__sympy-14248
+sphinx-doc__sphinx-7590
+astropy__astropy-7166
+django__django-10554
+scikit-learn__scikit-learn-26323
+pytest-dev__pytest-7432
+matplotlib__matplotlib-24970
+mwaskom__seaborn-3187

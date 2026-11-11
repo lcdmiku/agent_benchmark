@@ -1,0 +1,77 @@
+{
+  "dataset": "SWE-bench/SWE-bench_Verified",
+  "seed": 42,
+  "selection_strategy": "difficulty-stratified-unique-repo",
+  "candidate_count": 500,
+  "selected_count": 10,
+  "difficulty_counts": {
+    "15 min - 1 hour": 261,
+    "1-4 hours": 42,
+    "<15 min fix": 194,
+    ">4 hours": 3
+  },
+  "selected": [
+    {
+      "instance_id": "psf__requests-6028",
+      "repo": "psf/requests",
+      "difficulty": "15 min - 1 hour"
+    },
+    {
+      "instance_id": "pydata__xarray-4356",
+      "repo": "pydata/xarray",
+      "difficulty": "<15 min fix"
+    },
+    {
+      "instance_id": "sympy__sympy-14248",
+      "repo": "sympy/sympy",
+      "difficulty": "1-4 hours"
+    },
+    {
+      "instance_id": "sphinx-doc__sphinx-7590",
+      "repo": "sphinx-doc/sphinx",
+      "difficulty": ">4 hours"
+    },
+    {
+      "instance_id": "astropy__astropy-7166",
+      "repo": "astropy/astropy",
+      "difficulty": "<15 min fix"
+    },
+    {
+      "instance_id": "django__django-10554",
+      "repo": "django/django",
+      "difficulty": "1-4 hours"
+    },
+    {
+      "instance_id": "scikit-learn__scikit-learn-26323",
+      "repo": "scikit-learn/scikit-learn",
+      "difficulty": "15 min - 1 hour"
+    },
+    {
+      "instance_id": "pytest-dev__pytest-7432",
+      "repo": "pytest-dev/pytest",
+      "difficulty": "<15 min fix"
+    },
+    {
+      "instance_id": "matplotlib__matplotlib-24970",
+      "repo": "matplotlib/matplotlib",
+      "difficulty": "15 min - 1 hour"
+    },
+    {
+      "instance_id": "mwaskom__seaborn-3187",
+      "repo": "mwaskom/seaborn",
+      "difficulty": "15 min - 1 hour"
+    }
+  ],
+  "instance_ids": [
+    "psf__requests-6028",
+    "pydata__xarray-4356",
+    "sympy__sympy-14248",
+    "sphinx-doc__sphinx-7590",
+    "astropy__astropy-7166",
+    "django__django-10554",
+    "scikit-learn__scikit-learn-26323",
+    "pytest-dev__pytest-7432",
+    "matplotlib__matplotlib-24970",
+    "mwaskom__seaborn-3187"
+  ]
+}
